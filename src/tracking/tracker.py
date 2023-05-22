@@ -1,6 +1,9 @@
 import os
 
+import numpy as np
+
 from tracking.cell import Cell
+from utils.files import get_key_labels_files
 
 
 class CellTracker:
@@ -8,10 +11,10 @@ class CellTracker:
         self.folder_path = folder_path
         self.cells = []
 
-    def get_cell_coordinates(self, line: str):
+    def get_cell_coordinates(self, line: str) -> list:
         return list(map(float, line.split(" ")[1:3]))
 
-    def get_cells_positions(self, filename: str):
+    def get_cells_positions(self, filename: str) -> list:
         with open(self.folder_path + "\\" + filename) as f:
             return list(map(self.get_cell_coordinates, f.readlines()))
 
@@ -55,31 +58,32 @@ class CellTracker:
         for cell, all_coordinates in cells_with_multiple_coords.items():
             all_diff = list(map(cell.get_distance, all_coordinates))
             selected_coords = all_coordinates[all_diff.index(min(all_diff))]
-            other_coords = [coords for coords in all_coordinates if coords != selected_coords]
+            other_coords = [
+                coords for coords in all_coordinates if coords != selected_coords
+            ]
 
             cell_coords_mapping.update({cell: [selected_coords]})
             for coords in other_coords:
-                new_cell = Cell(number_id=len(self.cells)+1)
+                new_cell = Cell(number_id=len(self.cells) + 1)
                 self.cells.append(new_cell)
                 cell_coords_mapping.update({new_cell: [coords]})
-            
+
         return cell_coords_mapping
-        
+
     def set_new_positions(self, frame: int, cell_coords_mapping: dict):
         for cell in cell_coords_mapping:
             cell.set_position(frame=frame + 1, coordinates=cell_coords_mapping[cell][0])
 
-    def sort_folder(self, filename):
-        return int(filename.split("_")[3][:-4])
-
     def track(self):
-        files = sorted(os.listdir(self.folder_path)[1:], key=self.sort_folder)
+        files = sorted(os.listdir(self.folder_path)[1:], key=get_key_labels_files)
         for frame, filename in enumerate(files):
             cell_coords_mapping = self.associate_next_coords_to_cells(filename=filename)
-            cell_coords_mapping = self.create_cells_if_multiple_coords(cell_coords_mapping=cell_coords_mapping)
+            cell_coords_mapping = self.create_cells_if_multiple_coords(
+                cell_coords_mapping=cell_coords_mapping
+            )
             self.set_new_positions(frame=frame, cell_coords_mapping=cell_coords_mapping)
 
-    def find_zero_sublist(self, lst):
+    def find_zero_sublist(self, lst: list) ->list:
         results = []
         count_zeros = 0
         for i in range(1, len(lst)):
@@ -87,7 +91,9 @@ class CellTracker:
                 count_zeros += 1
             else:
                 if count_zeros <= 3 and count_zeros > 0:
-                    results.append((i - count_zeros - 1, lst[i - count_zeros - 1:i + 1]))
+                    results.append(
+                        (i - count_zeros - 1, lst[i - count_zeros - 1 : i + 1])
+                    )
                 count_zeros = 0
         return results
 
@@ -96,17 +102,10 @@ class CellTracker:
             zero_sublist = self.find_zero_sublist(cell.positions)
             for elem in zero_sublist:
                 index, lst = elem
-                x_before, y_before = lst[0]
-                x_after, y_after = lst[-1]
-                length = len(lst) - 1
-
-                new_pos = [[round((x_after + x_before) * i / length, 6), round((y_after + y_before) * i / length, 6)] for i in range(1, length)]
-                new_pos = [lst[0]] + new_pos + [lst[-1]]
-
+                new_pos = np.round(np.linspace(lst[0], lst[-1], len(lst)), 6).tolist()
                 for coord in new_pos:
                     cell.set_position(frame=index, coordinates=coord)
                     index += 1
- 
 
     def write_result(self):
         with open(rf"data\track\result.txt", "w") as f:
@@ -114,15 +113,3 @@ class CellTracker:
                 for frame in range(25):
                     position = " ".join(list(map(str, cell.get_positions()[frame])))
                     f.write(f"{frame+1} {cell.get_number_id()} {position}\n")
-
-
-if __name__ == "__main__":
-    folder_path = (
-        r"C:\Users\Maximilien\Desktop\yolo\projet\runs\detect\predict12\labels"
-    )
-
-    tracker = CellTracker(folder_path=folder_path)
-    tracker.initialize_cells()
-    tracker.track()
-    tracker.fill_gap_positions()
-    tracker.write_result()
