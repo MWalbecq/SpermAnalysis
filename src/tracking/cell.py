@@ -4,16 +4,11 @@ class Cell:
     def __init__(self, number_id: int) -> None:
         self.number_id = number_id
         self.positions = [[0, 0]] * 25
+        self.motility = 5
+        self.total_distance = 0
+        self.linearity = 0
+        self.avg_speed = 0
 
-    def get_number_id(self):
-        return self.number_id
-    
-    def get_positions(self):
-        return self.positions
-
-    def set_position(self, frame:int, coordinates: list):
-        self.positions[frame] = coordinates
-    
     def get_last_position(self):
         return [pos for pos in self.positions if pos != [0, 0]][-1][:]
 

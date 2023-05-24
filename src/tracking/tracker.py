@@ -1,30 +1,32 @@
 import os
+import pickle
 
 import numpy as np
+from scipy.interpolate import interp1d
 
 from tracking.cell import Cell
 from utils.files import get_key_labels_files
 
 
 class CellTracker:
-    def __init__(self, folder_path: str) -> None:
+    def __init__(self, folder_path: str, cells: list) -> None:
         self.folder_path = folder_path
-        self.cells = []
+        self.cells = cells
 
     def get_cell_coordinates(self, line: str) -> list:
         return list(map(float, line.split(" ")[1:3]))
 
-    def get_cells_positions(self, filename: str) -> list:
+    def get_cell_position(self, filename: str) -> list:
         with open(self.folder_path + "\\" + filename) as f:
             return list(map(self.get_cell_coordinates, f.readlines()))
 
     def initialize_cells(self):
         initial_file = os.listdir(self.folder_path)[0]
         for index, cell_position in enumerate(
-            self.get_cells_positions(filename=initial_file)
+            self.get_cell_position(filename=initial_file)
         ):
             cell = Cell(number_id=index + 1)
-            cell.set_position(frame=0, coordinates=cell_position)
+            cell.positions[0] = cell_position
             self.cells.append(cell)
 
     def get_nearest_cell(self, coordinates: list) -> Cell:
@@ -40,7 +42,7 @@ class CellTracker:
 
     def associate_next_coords_to_cells(self, filename: str) -> dict:
         cell_coords_mapping = {}
-        for coordinates in self.get_cells_positions(filename=filename):
+        for coordinates in self.get_cell_position(filename=filename):
             nearest_cell = self.get_nearest_cell(coordinates=coordinates)
 
             if nearest_cell not in cell_coords_mapping.keys():
@@ -72,7 +74,7 @@ class CellTracker:
 
     def set_new_positions(self, frame: int, cell_coords_mapping: dict):
         for cell in cell_coords_mapping:
-            cell.set_position(frame=frame + 1, coordinates=cell_coords_mapping[cell][0])
+            cell.positions[frame+1] = cell_coords_mapping[cell][0]
 
     def track(self):
         files = sorted(os.listdir(self.folder_path)[1:], key=get_key_labels_files)
@@ -83,19 +85,52 @@ class CellTracker:
             )
             self.set_new_positions(frame=frame, cell_coords_mapping=cell_coords_mapping)
 
+    def interpolate_missing_coordinates(self):
+        for cell in self.cells:
+            positions = cell.positions
+            values = [positions[i] for i in range(25) if positions[i] != [0, 0]]
+            frames = [i for i in range(25) if positions[i] != [0, 0]]
+            missing_frames = [i for i in range(25) if positions[i] == [0, 0]]
+
+            if len(frames) > len(missing_frames):
+                x_coords, y_coords = zip(*values)
+                interp = interp1d(x=frames, y=x_coords, kind="nearest", fill_value="extrapolate")
+                x_interpolated = interp(missing_frames)
+
+                interp = interp1d(frames, y_coords, kind="nearest", fill_value="extrapolate")
+                y_interpolated = interp(missing_frames)
+
+                interpolated = values + list(map(list, zip(x_interpolated, y_interpolated)))
+                frames = frames + missing_frames
+                sorted_interpolated = [x for _, x in sorted(zip(frames, interpolated))]
+
+                cell.positions = sorted_interpolated
+
     def find_zero_sublist(self, lst: list) ->list:
-        results = []
-        count_zeros = 0
-        for i in range(1, len(lst)):
-            if lst[i] == [0, 0]:
-                count_zeros += 1
-            else:
-                if count_zeros <= 3 and count_zeros > 0:
-                    results.append(
-                        (i - count_zeros - 1, lst[i - count_zeros - 1 : i + 1])
-                    )
-                count_zeros = 0
-        return results
+        all = []
+        nb_zero = 0
+        start = [0, 0]
+        start_index = 0
+        
+        for index, elem in enumerate(lst):
+            if (start != [0, 0]) and (elem != [0, 0]):
+                if nb_zero == 0:
+                    start = elem
+                    start_index = index
+                    
+                else:
+                    all.append((start_index, [start] + [[0, 0]] * nb_zero + [elem]))
+                    start = [0, 0]
+            
+            if (start == [0, 0]) and (elem != [0, 0]):
+                nb_zero = 0
+                start = elem
+                start_index = index
+                
+            if (start != [0, 0]) and (elem == [0, 0]):
+                nb_zero += 1
+    
+        return all
 
     def fill_gap_positions(self):
         for cell in self.cells:
@@ -104,12 +139,14 @@ class CellTracker:
                 index, lst = elem
                 new_pos = np.round(np.linspace(lst[0], lst[-1], len(lst)), 6).tolist()
                 for coord in new_pos:
-                    cell.set_position(frame=index, coordinates=coord)
+                    cell.positions[index] = coord
                     index += 1
 
-    def write_result(self):
-        with open(rf"data\track\result.txt", "w") as f:
-            for cell in self.cells:
-                for frame in range(25):
-                    position = " ".join(list(map(str, cell.get_positions()[frame])))
-                    f.write(f"{frame+1} {cell.get_number_id()} {position}\n")
+    def get_pickle(self):
+        cells_path = {}
+        for cell in self.cells:
+            if [0, 0] not in cell.positions:
+                cells_path.update({cell.number_id: cell.positions})
+
+        with open(r'data\track\result.pickle', 'wb') as f:
+            pickle.dump(cells_path, f)
